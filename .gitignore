@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+inbox.db
+.trae-html-share-packages/

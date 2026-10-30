@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Inbox</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #a8a29e; }
+    ::-webkit-scrollbar-track { background: transparent; }
+
+    .tab-btn {
+      display: flex; align-items: center; gap: 6px; height: 100%;
+      padding: 0 14px; font-size: 13px; color: #78716c;
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+      transition: color .15s;
+    }
+    .tab-btn:hover { color: #292524; }
+    .tab-btn.active { color: #292524; font-weight: 600; border-color: #292524; }
+    .tab-btn .pill { font-size: 11px; color: #78716c; background: #f0ede6; border-radius: 9999px; padding: 1px 7px; }
+    .tab-btn.active .pill { background: #292524; color: #fffdf9; }
+
+    /* 打字动画 */
+    .dots { display: inline-flex; align-items: center; padding: 4px 0; }
+    .dots span {
+      display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+      background: #a3a3a3; margin: 0 2px; animation: dotBounce 1.2s infinite;
+    }
+    .dots span:nth-child(2) { animation-delay: .2s; }
+    .dots span:nth-child(3) { animation-delay: .4s; }
+    @keyframes dotBounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+      30% { transform: translateY(-4px); opacity: 1; }
+    }
+  </style>
+</head>
+<body class="flex h-screen flex-col overflow-hidden bg-[#f6f4ef] text-stone-800 antialiased">
+
+  <!-- 顶栏 -->
+  <header class="flex h-14 shrink-0 items-center justify-between px-5">
+    <div class="flex items-center gap-2.5">
+      <div class="flex h-7 w-7 items-center justify-center rounded-lg bg-stone-800 text-[11px] font-bold text-white">AI</div>
+      <h1 class="font-serif text-lg font-semibold tracking-tight text-stone-800">AI Inbox</h1>
+      <span id="model-badge" class="rounded-full border border-stone-200 bg-[#fffdf9] px-2 py-0.5 text-xs text-stone-500">加载中…</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="clear-chat"
+        class="rounded-lg border border-stone-200 bg-[#fffdf9] px-3 py-1.5 text-sm text-stone-600 transition-colors hover:border-neutral-900 hover:text-neutral-900">清空对话</button>
+      <button id="settings-btn"
+        class="rounded-lg border border-stone-200 bg-[#fffdf9] px-3 py-1.5 text-sm text-stone-600 transition-colors hover:border-neutral-900 hover:text-neutral-900">设置</button>
+    </div>
+  </header>
+
+  <main class="flex min-h-0 flex-1 gap-3 px-4 pb-4">
+
+    <!-- 左：AI 对话卡片 -->
+    <section class="flex w-[400px] shrink-0 flex-col overflow-hidden rounded-2xl border border-stone-200/80 bg-[#fffdf9] shadow-[0_1px_2px_rgba(80,65,40,0.04),0_8px_24px_rgba(80,65,40,0.06)] xl:w-[460px]">
+      <div class="flex h-12 shrink-0 items-center justify-between border-b border-stone-100 px-4">
+        <span class="text-sm font-medium">AI 对话</span>
+        <span class="text-xs text-stone-400">自动识别 待办 / 笔记 / 闲聊</span>
+      </div>
+
+      <div id="chat" class="flex-1 space-y-3.5 overflow-y-auto bg-stone-50/60 p-4"></div>
+
+      <div class="border-t border-stone-100 p-3">
+        <div class="rounded-xl border border-stone-200 bg-[#fffdf9] p-1.5 transition-colors focus-within:border-neutral-900">
+          <textarea id="input" rows="2" placeholder="说点什么：待办、灵感、或随便聊聊…"
+            class="w-full resize-none bg-transparent px-2 pt-1 text-sm outline-none"></textarea>
+          <div class="flex items-center justify-between px-1 pb-0.5">
+            <span class="text-[11px] text-stone-400">Enter 发送 · Shift+Enter 换行</span>
+            <button id="send" title="发送"
+              class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-800 text-white transition-colors hover:bg-stone-700 disabled:opacity-30">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右：清单卡片（Todo / Note 标签页） -->
+    <section class="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-stone-200/80 bg-[#fffdf9] shadow-[0_1px_2px_rgba(80,65,40,0.04),0_8px_24px_rgba(80,65,40,0.06)]">
+      <div class="flex h-12 shrink-0 items-center justify-between border-b border-stone-100 pl-2 pr-4">
+        <div class="flex h-full">
+          <button class="tab-btn active" data-tab="todos">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+            任务清单 <span id="todo-count" class="pill">0</span>
+          </button>
+          <button class="tab-btn" data-tab="notes">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            灵感笔记 <span id="note-count" class="pill">0</span>
+          </button>
+        </div>
+        <span class="text-xs text-stone-400">AI 自动归类，也可手动添加</span>
+      </div>
+
+      <div class="border-b border-stone-100 p-3">
+        <div class="flex items-center gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 transition-colors focus-within:border-neutral-900 focus-within:bg-[#fffdf9]">
+          <svg id="quick-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="shrink-0 text-stone-400"><path d="M12 5v14M5 12h14"/></svg>
+          <input id="quick-input" placeholder="添加待办，回车确认"
+            class="w-full bg-transparent text-sm outline-none">
+        </div>
+      </div>
+
+      <ul id="todos" class="flex-1 space-y-0.5 overflow-y-auto p-3"></ul>
+      <ul id="notes" class="hidden flex-1 space-y-0.5 overflow-y-auto p-3"></ul>
+    </section>
+
+  </main>
+
+  <!-- 设置弹窗 -->
+  <div id="settings-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-stone-800/30 p-4 backdrop-blur-[2px]">
+    <div class="w-full max-w-md rounded-2xl border border-stone-200 bg-[#fffdf9] p-6 shadow-xl">
+      <h2 class="text-lg font-semibold">模型设置</h2>
+      <p class="mt-1 text-xs text-stone-500">保存在本地 SQLite，留空的字段不会被覆盖</p>
+      <div class="mt-4 space-y-3 text-sm">
+        <label class="block">
+          <span class="mb-1 block text-stone-600">
+            API Key <span id="key-now" class="text-stone-400"></span>
+          </span>
+          <input id="set-key" type="password" placeholder="sk-..."
+            class="w-full rounded-lg border border-stone-300 p-2 focus:border-neutral-900 focus:outline-none">
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-stone-600">Base URL</span>
+          <input id="set-url" placeholder="https://api.deepseek.com/v1"
+            class="w-full rounded-lg border border-stone-300 p-2 focus:border-neutral-900 focus:outline-none">
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-stone-600">模型名称</span>
+          <input id="set-model" placeholder="deepseek-chat"
+            class="w-full rounded-lg border border-stone-300 p-2 focus:border-neutral-900 focus:outline-none">
+        </label>
+      </div>
+      <p id="settings-msg" class="mt-3 hidden text-xs text-green-600"></p>
+      <div class="mt-4 flex justify-end gap-2">
+        <button id="settings-cancel"
+          class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm text-stone-600 hover:border-neutral-900">取消</button>
+        <button id="settings-save"
+          class="rounded-lg bg-stone-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-stone-700">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const chatEl = document.getElementById('chat');
+    const inputEl = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
+    const quickInput = document.getElementById('quick-input');
+
+    async function api(url, options = {}) {
+      const res = await fetch(url, options);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `请求失败 (${res.status})`);
+      }
+      return res;
+    }
+
+    const shortTime = ts => (ts || '').slice(11, 16);
+
+    // 页面内提示条（兼容禁用弹窗的环境）
+    function toast(msg) {
+      let t = document.getElementById('toast');
+      if (!t) {
+        t = document.createElement('div');
+        t.id = 'toast';
+        t.className = 'fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-stone-800 px-4 py-2 text-sm text-white shadow-lg transition-opacity duration-300';
+        document.body.appendChild(t);
+      }
+      t.textContent = msg;
+      t.style.opacity = '1';
+      clearTimeout(t._timer);
+      t._timer = setTimeout(() => { t.style.opacity = '0'; }, 2500);
+    }
+
+    // 两步确认（兼容禁用弹窗的环境）：首次点击进入待确认态，3 秒内再点执行
+    function twoStep(btn, armedLabel, action) {
+      if (btn.dataset.armed) {
+        btn.dataset.armed = '';
+        btn.textContent = btn.dataset.original;
+        btn.classList.remove('text-red-600', 'border-red-300');
+        action();
+        return;
+      }
+      btn.dataset.armed = '1';
+      btn.dataset.original = btn.textContent;
+      btn.textContent = armedLabel;
+      btn.classList.add('text-red-600', 'border-red-300');
+      setTimeout(() => {
+        if (!btn.dataset.armed) return;
+        btn.dataset.armed = '';
+        btn.textContent = btn.dataset.original;
+        btn.classList.remove('text-red-600', 'border-red-300');
+      }, 3000);
+    }
+
+    // ---------- 对话 ----------
+
+    function addMsg(role, text) {
+      const isUser = role === 'user';
+      const row = document.createElement('div');
+      row.className = 'flex items-end gap-2 ' + (isUser ? 'justify-end' : 'justify-start');
+
+      if (!isUser) {
+        const av = document.createElement('div');
+        av.className = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-stone-800 text-[10px] font-semibold text-white';
+        av.textContent = 'AI';
+        row.appendChild(av);
+      }
+
+      const bubble = document.createElement('div');
+      bubble.className = isUser
+        ? 'max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-stone-800 px-3.5 py-2 text-sm leading-relaxed text-white'
+        : 'max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-bl-md border border-stone-200/80 bg-[#fffdf9] px-3.5 py-2 text-sm leading-relaxed text-stone-700 shadow-sm';
+      bubble.textContent = text;
+      row.appendChild(bubble);
+      chatEl.appendChild(row);
+      chatEl.scrollTop = chatEl.scrollHeight;
+      return bubble;
+    }
+
+    // 提取结果状态条：✓ 已记为待办 / ✦ 已存为笔记 / 闲聊未记录
+    function addEvent(type, content) {
+      const row = document.createElement('div');
+      row.className = 'flex justify-center';
+      const chip = document.createElement('div');
+      if (type === 'chat') {
+        chip.className = 'rounded-full bg-stone-200/70 px-3 py-1 text-xs text-stone-500';
+        chip.textContent = '闲聊 · 不记录';
+      } else if (type === 'todo') {
+        chip.className = 'rounded-full border border-stone-200 bg-[#fffdf9] px-3 py-1 text-xs text-stone-600';
+        chip.textContent = '✓ 已记为待办：' + content;
+      } else {
+        chip.className = 'rounded-full border border-stone-200 bg-[#fffdf9] px-3 py-1 text-xs text-stone-600';
+        chip.textContent = '✦ 已存为笔记：' + content;
+      }
+      row.appendChild(chip);
+      chatEl.appendChild(row);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+    function typingBubble() {
+      const bubble = addMsg('assistant', '');
+      bubble.innerHTML = '<span class="dots"><span></span><span></span><span></span></span>';
+      return bubble;
+    }
+
+    function chatEmptyTip() {
+      const tip = document.createElement('div');
+      tip.className = 'flex h-full flex-col items-center justify-center gap-2 text-center';
+      tip.innerHTML =
+        '<div class="flex h-10 w-10 items-center justify-center rounded-full bg-stone-200 text-xs font-bold text-stone-500">AI</div>' +
+        '<p class="text-sm font-medium text-stone-500">开始你的第一条记录</p>' +
+        '<p class="max-w-[240px] text-xs leading-relaxed text-stone-400">说「明天交作业」记为待办，「周末看电影」记为笔记，纯聊天则只回复不记录。</p>';
+      chatEl.appendChild(tip);
+    }
+
+    async function loadMessages() {
+      try {
+        const res = await api('/api/messages');
+        const { messages } = await res.json();
+        chatEl.innerHTML = '';
+        if (!messages.length) { chatEmptyTip(); return; }
+        messages.forEach(m => {
+          if (m.role === 'event') {
+            try {
+              const ev = JSON.parse(m.content);
+              addEvent(ev.type, ev.content);
+            } catch (_) { /* 忽略损坏的事件 */ }
+          } else {
+            addMsg(m.role, m.content);
+          }
+        });
+      } catch (_) { /* 忽略加载失败 */ }
+    }
+
+    async function send() {
+      const text = inputEl.value.trim();
+      if (!text) return;
+      const tip = chatEl.querySelector('.flex.h-full');
+      if (tip) tip.remove();
+      addMsg('user', text);
+      inputEl.value = '';
+      sendBtn.disabled = true;
+
+      const bubble = typingBubble();
+      let reply = '';
+      let first = true;
+      try {
+        const res = await api('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split('\n\n');
+          buf = parts.pop();
+          for (const part of parts) {
+            if (!part.startsWith('data: ')) continue;
+            let payload;
+            try { payload = JSON.parse(part.slice(6)); } catch (_) { continue; }
+            if (payload.event === 'extracted') {
+              addEvent(payload.type, payload.content);
+            } else if (payload.event === 'delta') {
+              if (first) { bubble.textContent = ''; first = false; }
+              reply += payload.text;
+              bubble.textContent = reply;
+              chatEl.scrollTop = chatEl.scrollHeight;
+            }
+          }
+        }
+        if (!reply.trim()) bubble.textContent = '（AI 未返回内容）';
+        await loadData();
+      } catch (e) {
+        bubble.textContent = '处理失败：' + e.message;
+        bubble.className = 'max-w-[80%] whitespace-pre-wrap rounded-2xl bg-red-50 px-3.5 py-2 text-sm leading-relaxed text-red-600';
+      } finally {
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    async function clearChat() {
+      try {
+        await api('/api/messages', { method: 'DELETE' });
+        chatEl.innerHTML = '';
+        chatEmptyTip();
+        toast('对话已清空');
+      } catch (e) { toast('清空失败：' + e.message); }
+    }
+
+    // ---------- 标签页 ----------
+
+    let activeTab = 'todos';
+
+    function switchTab(name) {
+      activeTab = name;
+      document.querySelectorAll('.tab-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.tab === name));
+      document.getElementById('todos').classList.toggle('hidden', name !== 'todos');
+      document.getElementById('notes').classList.toggle('hidden', name !== 'notes');
+      quickInput.placeholder = name === 'todos' ? '添加待办，回车确认' : '添加笔记，回车确认';
+    }
+
+    // ---------- Todos ----------
+
+    function actionBtn(label, cls, onClick) {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.className = 'rounded px-1.5 py-0.5 text-xs ' + cls;
+      btn.addEventListener('click', onClick);
+      return btn;
+    }
+
+    function emptyList(text) {
+      const li = document.createElement('li');
+      li.className = 'flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-stone-200 py-10 text-center';
+      li.innerHTML =
+        `<p class="text-sm font-medium text-stone-400">${text}</p>` +
+        '<p class="text-xs text-stone-300">在对话里说出来，或在上方输入框手动添加</p>';
+      return li;
+    }
+
+    function renderTodos(items) {
+      const el = document.getElementById('todos');
+      el.innerHTML = '';
+      const undone = items.filter(t => !t.done).length;
+      document.getElementById('todo-count').textContent = items.length ? (undone || '全部完成') : 0;
+      if (!items.length) { el.appendChild(emptyList('还没有待办')); return; }
+      items.forEach(item => {
+        const li = document.createElement('li');
+        li.className = 'group flex items-start gap-2.5 rounded-xl px-3 py-2.5 transition-colors hover:bg-stone-50';
+        if (item.done) li.classList.add('opacity-50');
+
+        const check = document.createElement('button');
+        check.className = 'mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[10px] text-white transition-colors ' +
+          (item.done ? 'border-neutral-900 bg-stone-800' : 'border-stone-300 hover:border-neutral-900');
+        check.textContent = item.done ? '✓' : '';
+        check.title = item.done ? '标记为未完成' : '标记为已完成';
+        check.addEventListener('click', async () => {
+          try {
+            await api(`/api/todos/${item.id}/toggle`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ done: !item.done })
+            });
+            loadData();
+          } catch (e) { toast(e.message); }
+        });
+
+        const content = document.createElement('span');
+        content.className = 'flex-1 text-sm ' + (item.done ? 'text-stone-400 line-through' : '');
+        content.textContent = item.content;
+        content.title = '双击编辑';
+        content.addEventListener('dblclick', () => startEdit('todos', item, content));
+
+        const time = document.createElement('span');
+        time.className = 'shrink-0 pt-0.5 text-xs text-stone-300';
+        time.textContent = shortTime(item.created_at);
+
+        const delBtn = actionBtn('删除', 'text-stone-400 hover:text-red-600', () =>
+          twoStep(delBtn, '确认删除？', async () => {
+            try { await api(`/api/todos/${item.id}`, { method: 'DELETE' }); loadData(); }
+            catch (e) { toast(e.message); }
+          })
+        );
+
+        const actions = document.createElement('span');
+        actions.className = 'hidden shrink-0 gap-1 group-hover:flex';
+        actions.append(
+          actionBtn('编辑', 'text-stone-400 hover:text-neutral-900', () => startEdit('todos', item, content)),
+          delBtn
+        );
+
+        li.append(check, content, time, actions);
+        el.appendChild(li);
+      });
+    }
+
+    // ---------- Notes ----------
+
+    function renderNotes(items) {
+      const el = document.getElementById('notes');
+      el.innerHTML = '';
+      document.getElementById('note-count').textContent = items.length;
+      if (!items.length) { el.appendChild(emptyList('还没有笔记')); return; }
+      items.forEach(item => {
+        const li = document.createElement('li');
+        li.className = 'group flex items-start gap-2.5 rounded-xl border border-stone-100 px-3 py-2.5 transition-colors hover:border-stone-200 hover:bg-stone-50';
+
+        const content = document.createElement('span');
+        content.className = 'flex-1 text-sm leading-relaxed';
+        content.textContent = item.content;
+        content.title = '双击编辑';
+        content.addEventListener('dblclick', () => startEdit('notes', item, content));
+
+        const time = document.createElement('span');
+        time.className = 'shrink-0 pt-0.5 text-xs text-stone-300';
+        time.textContent = shortTime(item.created_at);
+
+        const delBtn = actionBtn('删除', 'text-stone-400 hover:text-red-600', () =>
+          twoStep(delBtn, '确认删除？', async () => {
+            try { await api(`/api/notes/${item.id}`, { method: 'DELETE' }); loadData(); }
+            catch (e) { toast(e.message); }
+          })
+        );
+
+        const actions = document.createElement('span');
+        actions.className = 'hidden shrink-0 gap-1 group-hover:flex';
+        actions.append(
+          actionBtn('编辑', 'text-stone-400 hover:text-neutral-900', () => startEdit('notes', item, content)),
+          delBtn
+        );
+
+        li.append(content, time, actions);
+        el.appendChild(li);
+      });
+    }
+
+    // 行内编辑（兼容禁用弹窗的环境）：内容原地变成输入框
+    function startEdit(kind, item, contentEl) {
+      if (contentEl.dataset.editing) return;
+      contentEl.dataset.editing = '1';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = item.content;
+      input.className = 'w-full rounded border border-neutral-900 px-2 py-1 text-sm focus:outline-none';
+      contentEl.replaceWith(input);
+      input.focus();
+      input.select();
+      let closed = false;
+      const finish = async save => {
+        if (closed) return;
+        closed = true;
+        const val = input.value.trim();
+        if (save && val && val !== item.content) {
+          try {
+            await api(`/api/${kind}/${item.id}`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content: val })
+            });
+          } catch (e) { toast(e.message); }
+        }
+        loadData();
+      };
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') finish(true);
+        else if (e.key === 'Escape') finish(false);
+      });
+      input.addEventListener('blur', () => finish(true));
+    }
+
+    // ---------- 数据加载与手动添加 ----------
+
+    async function loadData() {
+      try {
+        const res = await api('/api/data');
+        const data = await res.json();
+        renderTodos(data.todos);
+        renderNotes(data.notes);
+      } catch (_) { /* 忽略 */ }
+    }
+
+    async function quickAdd() {
+      const content = quickInput.value.trim();
+      if (!content) return;
+      try {
+        await api(`/api/${activeTab}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content })
+        });
+        quickInput.value = '';
+        loadData();
+      } catch (e) { toast(e.message); }
+    }
+
+    // ---------- 设置面板 ----------
+
+    const modal = document.getElementById('settings-modal');
+    const keyNow = document.getElementById('key-now');
+    const msgEl = document.getElementById('settings-msg');
+
+    async function openSettings() {
+      msgEl.classList.add('hidden');
+      document.getElementById('set-key').value = '';
+      try {
+        const res = await api('/api/settings');
+        const cfg = await res.json();
+        keyNow.textContent = cfg.key_configured ? `(当前 ${cfg.OPENAI_API_KEY})` : '(未配置)';
+        document.getElementById('set-url').placeholder = cfg.OPENAI_BASE_URL || 'https://api.deepseek.com/v1';
+        document.getElementById('set-model').placeholder = cfg.MODEL_NAME || 'deepseek-chat';
+      } catch (_) {
+        keyNow.textContent = '(读取失败)';
+      }
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeSettings() {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    async function saveSettings() {
+      const body = {
+        OPENAI_API_KEY: document.getElementById('set-key').value.trim(),
+        OPENAI_BASE_URL: document.getElementById('set-url').value.trim(),
+        MODEL_NAME: document.getElementById('set-model').value.trim(),
+      };
+      if (!body.OPENAI_API_KEY && !body.OPENAI_BASE_URL && !body.MODEL_NAME) {
+        msgEl.textContent = '请至少填写一项';
+        msgEl.className = 'mt-3 text-xs text-red-600';
+        return;
+      }
+      try {
+        const res = await api('/api/settings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const cfg = await res.json();
+        keyNow.textContent = cfg.key_configured ? `(当前 ${cfg.OPENAI_API_KEY})` : '(未配置)';
+        document.getElementById('model-badge').textContent = cfg.MODEL_NAME;
+        msgEl.textContent = '已保存，立即生效';
+        msgEl.className = 'mt-3 text-xs text-green-600';
+      } catch (e) {
+        msgEl.textContent = '保存失败：' + e.message;
+        msgEl.className = 'mt-3 text-xs text-red-600';
+      }
+    }
+
+    async function loadBadge() {
+      try {
+        const res = await api('/api/settings');
+        const cfg = await res.json();
+        document.getElementById('model-badge').textContent =
+          cfg.MODEL_NAME + (cfg.key_configured ? '' : '（未配置 Key）');
+      } catch (_) { /* 忽略 */ }
+    }
+
+    // ---------- 事件绑定与初始化 ----------
+
+    sendBtn.addEventListener('click', send);
+    inputEl.addEventListener('input', () => {
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+    });
+    inputEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    const clearBtn = document.getElementById('clear-chat');
+    clearBtn.addEventListener('click', () => twoStep(clearBtn, '确认清空？', clearChat));
+    document.getElementById('settings-btn').addEventListener('click', openSettings);
+    document.getElementById('settings-cancel').addEventListener('click', closeSettings);
+    document.getElementById('settings-save').addEventListener('click', saveSettings);
+    modal.addEventListener('click', e => { if (e.target === modal) closeSettings(); });
+
+    document.querySelectorAll('.tab-btn').forEach(b =>
+      b.addEventListener('click', () => switchTab(b.dataset.tab)));
+    quickInput.addEventListener('keydown', e => { if (e.key === 'Enter') quickAdd(); });
+
+    loadBadge();
+    loadMessages();
+    loadData();
+  </script>
+</body>
+</html>
