@@ -8,23 +8,46 @@
 
 ## 核心架构
 
+系统采用分层架构，自上而下依次为：接口层（路由与协议）、服务层（业务编排）、智能层（LangChain 链）、数据层（SQLite 持久化），配置管理与数据模型作为基础设施贯穿各层。
+
 ```
 浏览器 (static/index.html)
-   │  ① POST /api/chat  {"text": "帮我记一下明天要买牛奶", "history": [...]}
+   │  ① POST /api/chat  {"text": "帮我记一下明天要买牛奶"}
    ▼
-FastAPI (main.py)
-   │  ② extract_info()
+接口层  app/api/routes.py          —— FastAPI 路由、参数校验、SSE 响应
+   │  ② 调用服务层
    ▼
-LangChain 链 (llm_chain.py)
-   Prompt ──▶ ChatOpenAI（云端 LLM）──▶ with_structured_output(ExtractedData, json_mode)
-   │  ③ 返回结构化结果 {type: "todo" | "note", content: "明天买牛奶"}
+服务层  app/services/inbox.py      —— 业务编排：提取 -> 分类入库 -> SSE 组装
+   │  ③ 调用智能层
    ▼
-SQLite (database.py)
-   │  ④ 按 type 写入 todos / notes 表
+智能层  app/chains/extractor.py    —— Prompt -> ChatOpenAI(云端 LLM)
+   │        -> with_structured_output(ExtractedData, json_mode)
+   │  ④ 返回结构化结果 {type: "todo"|"note"|"chat", content: "..."}
    ▼
-FastAPI ⑤ StreamingResponse 逐字流式返回 AI 对话式回复（带最近上下文）
+数据层  app/db/database.py         —— 按 type 写入 todos / notes / messages 表
+   │
+配置与模型  app/core/config.py     —— .env 兜底 + 设置表热更新
+            app/schemas/models.py  —— Pydantic 模型约束
    ▼
-浏览器 ⑥ 流式渲染回复气泡 + GET /api/data 刷新右侧两个列表
+浏览器  ⑤ SSE 流式渲染回复气泡 + GET /api/data 刷新右侧列表
+```
+
+## 项目结构
+
+```
+langchain-demo-3/
+├── main.py                  # 启动入口（转引 app 工厂）
+├── app/
+│   ├── main.py              # FastAPI 应用工厂：装配路由 + 静态资源
+│   ├── api/routes.py        # 接口层：全部 REST API（chat/process/todos/notes/settings）
+│   ├── services/inbox.py    # 服务层：提取编排、分类入库、SSE 流组装、配置热更新
+│   ├── chains/extractor.py  # 智能层：LangChain 结构化提取链 + 流式回复
+│   ├── schemas/models.py    # 模型层：Pydantic 模型（LLM 输出约束 + 请求体）
+│   ├── db/database.py       # 数据层：SQLite 建表迁移 + 增删改查
+│   └── core/config.py       # 基础设施：配置管理（.env + 设置表合并）
+├── static/index.html        # 单文件前端（左：AI 流式对话；右：Todos/Notes）
+├── requirements.txt         # 依赖清单
+└── .env.example             # 环境变量模板（复制为 .env 使用）
 ```
 
 ## 从零运行
@@ -58,19 +81,6 @@ uvicorn main:app --reload
 浏览器访问 <http://127.0.0.1:8000>，在左侧输入任意一句话，点击发送即可看到右侧自动归类出的待办与笔记。
 
 > 也可以不配置 `.env`：直接打开页面右上角「设置」，在弹窗里填 API Key / Base URL / 模型名，保存在本地 SQLite 并立即生效（Key 回显时自动打码）。`.env` 仅作为默认回退。
-
-## 项目结构
-
-```
-langchain-demo-3/
-├── requirements.txt     # 依赖清单
-├── .env.example         # 环境变量模板（复制为 .env 使用）
-├── database.py          # SQLite 建库建表 + todos/notes 增查
-├── llm_chain.py         # Pydantic 模型 + Prompt + with_structured_output 提取链
-├── main.py              # FastAPI 入口：/api/chat（流式对话）、/api/process、/api/data、设置、静态页挂载
-└── static/
-    └── index.html       # 三栏应用式前端（左：AI 流式对话；中：Todos；右：Notes）
-```
 
 ## 仓库链接
 
